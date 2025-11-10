@@ -1,0 +1,86 @@
+# ------------------------------------------
+# ROAD ACCIDENT HOTSPOT ANALYSIS PROJECT
+# ------------------------------------------
+
+import pandas as pd
+import numpy as np
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+import folium
+from folium.plugins import HeatMap
+import matplotlib.pyplot as plt
+
+# 1. LOAD DATA
+df = pd.read_csv("accidents.csv")
+print("Data Loaded:", df.shape)
+
+# 2. CLEAN DATA
+df = df.drop_duplicates()
+df = df.dropna(subset=['latitude', 'longitude'])
+df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+# Filter invalid coordinates
+df = df[(df.latitude.between(-90, 90)) & (df.longitude.between(-180, 180))]
+print("Cleaned Data:", df.shape)
+
+# 3. CLUSTERING USING DBSCAN
+coords = df[['latitude', 'longitude']].values
+scaler = StandardScaler()
+coords_scaled = scaler.fit_transform(coords)
+
+db = DBSCAN(eps=0.3, min_samples=5).fit(coords_scaled)
+df['cluster'] = db.labels_
+
+n_clusters = len(set(db.labels_)) - (1 if -1 in db.labels_ else 0)
+print("Total Hotspot Clusters Found:", n_clusters)
+
+# 4. FOLIUM HEATMAP
+center = [df.latitude.mean(), df.longitude.mean()]
+m = folium.Map(location=center, zoom_start=12, tiles="OpenStreetMap")
+
+heat_data = df[['latitude','longitude']].values.tolist()
+HeatMap(heat_data, radius=15, blur=10).add_to(m)
+
+# Mark cluster centers
+clusters = df[df.cluster != -1].groupby("cluster")
+for cluster_id, group in clusters:
+    folium.Marker(
+        location=[group.latitude.mean(), group.longitude.mean()],
+        popup=f"Hotspot {cluster_id} <br> Accidents: {len(group)}",
+        icon=folium.Icon(color="red", icon="info-sign")
+    ).add_to(m)
+
+m.save("hotspot_map.html")
+print("✅ Heatmap saved as hotspot_map.html")
+
+# 5. TEMPORAL ANALYSIS CHARTS
+df['hour'] = df.timestamp.dt.hour
+df['day'] = df.timestamp.dt.day_name()
+df['month'] = df.timestamp.dt.month
+
+plt.figure(figsize=(14,8))
+
+# Accidents by Hour
+plt.subplot(2,2,1)
+df.hour.value_counts().sort_index().plot(kind='bar')
+plt.title("Accidents by Hour")
+
+# Accidents by Day
+plt.subplot(2,2,2)
+df.day.value_counts().plot(kind='bar')
+plt.title("Accidents by Day")
+
+# Severity Distribution
+plt.subplot(2,2,3)
+df.severity.value_counts().plot(kind='pie', autopct="%1.1f%%")
+plt.title("Severity Distribution")
+
+# Monthly Trend
+plt.subplot(2,2,4)
+df.month.value_counts().sort_index().plot(kind='line', marker='o')
+plt.title("Monthly Accident Trend")
+
+plt.tight_layout()
+plt.show()
+
+print("✅ Analysis Completed Successfully")
